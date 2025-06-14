@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 #include <GL/glew.h> 
 #include <GLFW/glfw3.h>
@@ -11,8 +12,15 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#include "geometry.h"
+
 unsigned int compileShader(GLenum type, const char* source);
 unsigned int createShader(const char* vsSource, const char* fsSource);
+static unsigned loadImageToTexture(const char* filePath);
+unsigned createTexture(const char* filePath, GLint wrapS = GL_REPEAT, GLint wrapT = GL_REPEAT, GLint minFilter = GL_NEAREST, GLint magFilter = GL_NEAREST);
 
 int main(void)
 {
@@ -28,9 +36,9 @@ int main(void)
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     GLFWwindow* window;
-    unsigned int wWidth = 500;
-    unsigned int wHeight = 500;
-    const char wTitle[] = "[Generic Title]";
+    unsigned int wWidth = 1200;
+    unsigned int wHeight = 1200;
+    const char wTitle[] = "Garden of Flowers";
     window = glfwCreateWindow(wWidth, wHeight, wTitle, NULL, NULL);
     
     if (window == NULL)
@@ -52,18 +60,11 @@ int main(void)
     // ++++++++++++++++++++++++++++++++++++++++++++++++++++++ VARIABLES AND BUFFERS +++++++++++++++++++++++++++++++++++++++++++++++++
 
     unsigned int unifiedShader = createShader("basic.vert", "basic.frag");
+    unsigned int textureShader = createShader("texture.vert", "texture.frag");
 
-    float vertices[] =
-    {
-        -1.0, 0.0, 1.0,   0.0, 1.0, 0.0, 0.0, 
-        1.0, 0.0, 1.0,   0.0, 1.0, 0.0, 0.0,
-        1.0, 0.0, -1.0,   0.0, 1.0, 0.0, 0.0,
-
-        1.0, 0.0, -1.0,   0.0, 1.0, 0.0, 0.0, 
-       -1.0, 0.0, -1.0,   0.0, 1.0, 0.0, 0.0,
-        -1.0,   0.0, 1,   0.0, 1.0, 0.0, 0.0,
-    };
     unsigned int stride = (3 + 4) * sizeof(float); 
+
+    generateVertices( flowerScale, flowerSize, flowerHeight, baseY, xOffsets, zOffsets);
     
     unsigned int VAO;
     glGenVertexArrays(1, &VAO);
@@ -72,7 +73,7 @@ int main(void)
     unsigned int VBO;
     glGenBuffers(1, &VBO);
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);  // Can be  GL_STATIC_DRAW, but because we will change the vertices often, we use GL_DYNAMIC_DRAW
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
     glEnableVertexAttribArray(0);
@@ -81,21 +82,53 @@ int main(void)
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
-    
 
-    // ++++++++++++++++++++++++++++++++++++++++++++++++++++++            UNIFORMS            +++++++++++++++++++++++++++++++++++++++++++++++++
+    // Texture 
+
+    float nameVertices[] = {
+        1.0f, 0.9f,  1.0f, 0.0f,  
+        0.1f,  0.9f,  0.0f, 0.0f,  
+        1.0f, 1.0f,  1.0f, 1.0f,  
+        0.1f,  1.0f,  0.0f, 1.0f 
+    };
+
+    unsigned int strideTexture = (2 + 2) * sizeof(float); 
+
+    unsigned int VAO2;
+    glGenVertexArrays(1, &VAO2);
+    glBindVertexArray(VAO2);
+    unsigned int VBO2;
+    glGenBuffers(1, &VBO2);
+    glBindBuffer(GL_ARRAY_BUFFER, VBO2);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(nameVertices), nameVertices, GL_STATIC_DRAW);
+
+
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, strideTexture, (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, strideTexture, (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    unsigned nameTexture = createTexture("res/name.png");
+
+    // ++++++++++++++++++++++++++++++++++++++++++++++++++++++  UNIFORMS  +++++++++++++++++++++++++++++++++++++++++++++++++
 
     glm::mat4 model = glm::mat4(1.0f); //Transformation matrix - mat4(1.0f) - generate unit matrix
     unsigned int modelLoc = glGetUniformLocation(unifiedShader, "uM");
     
     glm::mat4 view; //View matrix (camera matrix)
-    view = glm::lookAt(glm::vec3(0.0f, 1.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));  // lookAt(Where the camera is, what the camera is looking at, unit vector of the positive Y axis of the world - this rotates the camera)
+    view = glm::lookAt(glm::vec3(0.0f, 1.0f, 1.7f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));  // lookAt(Where the camera is, what the camera is looking at, unit vector of the positive Y axis of the world - this rotates the camera)
     unsigned int viewLoc = glGetUniformLocation(unifiedShader, "uV");
     
     
     glm::mat4 projectionP = glm::perspective(glm::radians(90.0f), (float)wWidth / (float)wHeight, 0.1f, 100.0f); // Perspective projection matrix (FOV, Aspect Ratio, near plane, far plane)
     glm::mat4 projectionO = glm::ortho(-1.0f, 1.0f, -1.0f, 1.0f, 0.1f, 100.0f); // Orthographic projection matrix (left, right, bottom, top, near plane, far plane)
     unsigned int projectionLoc = glGetUniformLocation(unifiedShader, "uP");
+
+    // Texture uniforms
+    glUseProgram(textureShader);
+    glUniform1i(glGetUniformLocation(textureShader, "uTexture"), 0);
 
     // ++++++++++++++++++++++++++++++++++++++++++++++++++++++ RENDER LOOP +++++++++++++++++++++++++++++++++++++++++++++++++
     glUseProgram(unifiedShader); // Sending default values to the uniforms
@@ -104,68 +137,130 @@ int main(void)
     glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projectionO));
     glBindVertexArray(VAO);
 
-    glClearColor(0.5, 0.5, 0.5, 1.0);
+    glClearColor(0.1, 0.1, 0.1, 1.0);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glCullFace(GL_BACK); // Choose which face to cull (only works after enabling face culling)
+    
+    float lastScale = flowerScale;
+    
+    glEnable(GL_DEPTH_TEST);
 
+    glm::mat4 currentProjection = projectionP;
 
-   while (!glfwWindowShouldClose(window))
+    bool keyPressed[3] = { false, false, false }; 
+
+    double lastFrameTime = 0.0;
+    const double targetFrameRate = 1.0 / 60.0;
+    double currentTime = 0.0;
+
+    while (!glfwWindowShouldClose(window))
     {
-        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-        {
-            glfwSetWindowShouldClose(window, GL_TRUE);
-        }
+        currentTime = glfwGetTime();
+        if (currentTime - lastFrameTime >= targetFrameRate) {
+            lastFrameTime = currentTime;
 
-        // Depth testing
-        if (glfwGetKey(window, GLFW_KEY_1) == GLFW_PRESS)
-        {
-            glEnable(GL_DEPTH_TEST); // Enable Z-buffer testing
-        }
-        if (glfwGetKey(window, GLFW_KEY_2) == GLFW_PRESS)
-        {
-            glDisable(GL_DEPTH_TEST); // Disable Z-buffer testing
-        }
-
-        // Face culling (we previously set which face to cull using glCullFace)
-        if (glfwGetKey(window, GLFW_KEY_3) == GLFW_PRESS)
-        {
-            glEnable(GL_CULL_FACE); // Enable face culling
-        }
-        if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS)
-        {
-            glDisable(GL_CULL_FACE); // Disable face culling
-        }
-
-        // Switching projections
-        if (glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS)
-        {
-            glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projectionP)); // Use perspective projection
-        }
-        if (glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS)
-        {
-            glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(projectionO)); // Use orthographic projection
-        }
-
-        // Transforming triangles
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        {
-            //model = glm::translate(model, glm::vec3(-0.01, 0.0, 0.0)); // Translation (Transformation matrix, offset in XYZ)
-            model = glm::rotate(model, glm::radians(-0.5f), glm::vec3(0.0f, 1.0f, 0.0f)); // Rotation (Transformation matrix, rotation angle in radians, axis of rotation)
-            //model = glm::scale(model, glm::vec3(0.99, 1.0, 1.0)); // Scaling (Transformation matrix, scale factors in XYZ)
+            for (int i = 0; i < 3; ++i) {
+                int key = GLFW_KEY_3 - i;
+                if (glfwGetKey(window, key) == GLFW_PRESS) {
+                    if (!keyPressed[i]) {
+                        showRow[i] = !showRow[i]; // toggle visibility
+                        keyPressed[i] = true;
+    
+                        // Regenerate flower vertices
+                        generateVertices( flowerScale, flowerSize, flowerHeight, baseY, xOffsets, zOffsets);
+                        glBindBuffer(GL_ARRAY_BUFFER, VBO);
+                        glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);
+                        glBindBuffer(GL_ARRAY_BUFFER, 0);
+                    }
+                } else {
+                    keyPressed[i] = false; // Reset key press state
+                }
+            }
+            if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            {
+                glfwSetWindowShouldClose(window, GL_TRUE);
+            }
+    
+            // Depth testing
+            if (glfwGetKey(window, GLFW_KEY_4) == GLFW_PRESS)
+            {
+                glEnable(GL_DEPTH_TEST); // Enable Z-buffer testing
+            }
+            if (glfwGetKey(window, GLFW_KEY_5) == GLFW_PRESS)
+            {
+                glDisable(GL_DEPTH_TEST); // Disable Z-buffer testing
+            }
+    
+            // Face culling (we previously set which face to cull using glCullFace)
+            if (glfwGetKey(window, GLFW_KEY_6) == GLFW_PRESS)
+            {
+                glEnable(GL_CULL_FACE); // Enable face culling
+            }
+            if (glfwGetKey(window, GLFW_KEY_7) == GLFW_PRESS)
+            {
+                glDisable(GL_CULL_FACE); // Disable face culling
+            }
+    
+            // Switching projections
+            if (glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS) currentProjection = projectionP;
+            if (glfwGetKey(window, GLFW_KEY_O) == GLFW_PRESS) currentProjection = projectionO;
+    
+            // Transforming triangles
+            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+            {
+                model = glm::rotate(model, glm::radians(-0.5f), glm::vec3(0.0f, 1.0f, 0.0f)); // Rotation (Transformation matrix, rotation angle in radians, axis of rotation)
+                glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+            }
+            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            {
+                model = glm::rotate(model, glm::radians(0.5f), glm::vec3(0.0f, 1.0f, 0.0f));
+                glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+            }
+    
+            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+                flowerScale += 0.01f;
+                if (flowerScale > 1.0f) flowerScale = 1.0f;
+            }
+    
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+                flowerScale -= 0.01f;
+                if (flowerScale < 0.1f) flowerScale = 0.1f;
+            }
+    
+            // If scale changed, regenerate vertices and update VBO
+            if (flowerScale != lastScale) {
+                generateVertices( flowerScale, flowerSize, flowerHeight, baseY, xOffsets, zOffsets);
+    
+                glBindBuffer(GL_ARRAY_BUFFER, VBO);
+                glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);
+                glBindBuffer(GL_ARRAY_BUFFER, 0);
+    
+                lastScale = flowerScale;
+            }
+    
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // Refresh both the color buffer and the Z-buffer
+    
+            glUseProgram(unifiedShader);
             glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-        }
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        {
-            //model = glm::translate(model, glm::vec3(0.01, 0.0, 0.0));
-            model = glm::rotate(model, glm::radians(0.5f), glm::vec3(0.0f, 1.0f, 0.0f));
-            //model = glm::scale(model, glm::vec3(1.1, 1.0, 1.0));
-            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-        }
+            glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
+            glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(currentProjection));
+            glBindVertexArray(VAO);
+            glDrawArrays(GL_TRIANGLES, 0, vertices.size() / 7);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
 
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // Refresh both the color buffer and the Z-buffer
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+            glUseProgram(textureShader);
+            glBindVertexArray(VAO2);
+            glActiveTexture(GL_TEXTURE0);
 
-        glfwSwapBuffers(window);
-        glfwPollEvents();
+            glBindTexture(GL_TEXTURE_2D, nameTexture);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+            glBindVertexArray(0);
+
+            glfwSwapBuffers(window);
+            glfwPollEvents();
+        }
     }
 
     // ++++++++++++++++++++++++++++++++++++++++++++++++++++++ CLEANUP +++++++++++++++++++++++++++++++++++++++++++++++++
@@ -230,25 +325,76 @@ unsigned int createShader(const char* vsSource, const char* fsSource)
 
     glAttachShader(program, vertexShader);
     glAttachShader(program, fragmentShader);
-
     glLinkProgram(program);
-    glValidateProgram(program);
 
     int success;
     char infoLog[512];
-    glGetProgramiv(program, GL_VALIDATE_STATUS, &success);
-    if (success == GL_FALSE)
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success)
     {
-        glGetShaderInfoLog(program, 512, NULL, infoLog);
-        std::cout << "Linked shader program has an error! Error: \n";
-        std::cout << infoLog << std::endl;
+        glGetProgramInfoLog(program, 512, NULL, infoLog);
+        std::cout << "Shader Program linking failed:\n" << infoLog << std::endl;
     }
 
-    glDetachShader(program, vertexShader);
     glDeleteShader(vertexShader);
-    glDetachShader(program, fragmentShader);
     glDeleteShader(fragmentShader);
 
     return program;
+}
+unsigned createTexture(const char* filePath, GLint wrapS, GLint wrapT,GLint minFilter, GLint magFilter) {
+
+    unsigned texture = loadImageToTexture(filePath);
+    if (texture == 0) {
+        std::cout << "Error on texture load: " << filePath << std::endl;
+        return 0; // Return 0 if texture loading failed
+    }
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrapS);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrapT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minFilter);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, magFilter);
+    glBindTexture(GL_TEXTURE_2D, 0); 
+
+    return texture;
+}
+static unsigned loadImageToTexture(const char* filePath) {
+    int TextureWidth;
+    int TextureHeight;
+    int TextureChannels;
+    unsigned char* ImageData = stbi_load(filePath, &TextureWidth, &TextureHeight, &TextureChannels, 0);
+    if (ImageData != NULL)
+    {
+        // Images are usually loaded upside down by default, so they must be flipped to be upright
+        stbi__vertical_flip(ImageData, TextureWidth, TextureHeight, TextureChannels);
+
+        // Checks the color format of the loaded image
+        GLint InternalFormat = -1;
+        switch (TextureChannels) {
+        case 1: InternalFormat = GL_RED; break;
+        case 2: InternalFormat = GL_RG; break;
+        case 3: InternalFormat = GL_RGB; break;
+        case 4: InternalFormat = GL_RGBA; break;
+        default: InternalFormat = GL_RGB; break;
+        }
+
+        unsigned int Texture;
+        glGenTextures(1, &Texture);
+        glBindTexture(GL_TEXTURE_2D, Texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, InternalFormat, TextureWidth, TextureHeight, 0, InternalFormat, GL_UNSIGNED_BYTE, ImageData);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        // Free the memory allocated by stbi_load since it's no longer needed
+        stbi_image_free(ImageData);
+        return Texture;
+    }
+    else
+    {
+        std::cout << "Texture not loaded! Texture path: " << filePath << std::endl;
+        std::cout << "STB Error: " << stbi_failure_reason() << "\n";
+        stbi_image_free(ImageData);
+        return 0;
+    }
 }
 
